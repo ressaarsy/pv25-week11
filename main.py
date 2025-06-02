@@ -1,147 +1,207 @@
-import sys
+import sys, sqlite3, csv
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QTableWidget, QTableWidgetItem, QScrollArea,
-    QStatusBar, QDockWidget, QTextEdit, QSplitter, QSizePolicy
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel,
+    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView,
+    QDialog, QFormLayout, QDialogButtonBox, QStatusBar, QScrollArea, QTextEdit, QMainWindow,
+    QDockWidget
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
 
+class DialogEdit(QDialog):
+    def __init__(self, id_data, judul, penulis, tahun):
+        super().__init__()
+        self.setWindowTitle("Edit Data Buku")
+        self.setFixedSize(300, 180)
+        self.id_data = id_data
+        layout = QFormLayout()
+        self.in_judul = QLineEdit(judul)
+        self.in_penulis = QLineEdit(penulis)
+        self.in_tahun = QLineEdit(tahun)
+        layout.addRow("Judul:", self.in_judul)
+        layout.addRow("Penulis:", self.in_penulis)
+        layout.addRow("Tahun:", self.in_tahun)
+        tombol = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        tombol.accepted.connect(self.accept)
+        tombol.rejected.connect(self.reject)
+        layout.addWidget(tombol)
+        self.setLayout(layout)
 
-class AplikasiCRUD(QMainWindow):
+    def get_data(self):
+        return self.in_judul.text(), self.in_penulis.text(), self.in_tahun.text()
+
+class AplBuku(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Aplikasi CRUD - Week 11")
-        self.setMinimumSize(825, 500)
+        self.setWindowTitle("Aplikasi Data Buku")
+        self.resize(800, 600)
+        self.db()
+        self.ui()
+        self.load_data()
 
-        self.data = []
+    def db(self):
+        self.kon = sqlite3.connect("data.db")
+        self.kur = self.kon.cursor()
+        self.kur.execute("""
+            CREATE TABLE IF NOT EXISTS buku (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                judul TEXT,
+                penulis TEXT,
+                tahun INTEGER
+            )
+        """)
+        self.kon.commit()
 
-        self.lbl_nama = QLabel("Nama:")
-        self.lbl_nama.setFont(QFont("Arial", 10))
-        self.inp_nama = QLineEdit()
-        self.inp_nama.setPlaceholderText("Masukkan nama")
+    def ui(self):
+        pusat = QWidget()
+        utama = QVBoxLayout()
 
-        self.btn_tempel = QPushButton("Tempel dari Clipboard")
-        self.btn_tempel.clicked.connect(self.tempel_clipboard)
+        form = QHBoxLayout()
+        self.nm = QLineEdit()
+        self.pnls = QLineEdit()
+        self.thn = QLineEdit()
+        self.nm.setPlaceholderText("Judul Buku")
+        self.pnls.setPlaceholderText("Penulis")
+        self.thn.setPlaceholderText("Tahun")
+        form.addWidget(self.nm)
+        form.addWidget(self.pnls)
+        form.addWidget(self.thn)
 
-        self.lbl_alamat = QLabel("Alamat:")
-        self.lbl_alamat.setFont(QFont("Arial", 10))
-        self.inp_alamat = QLineEdit()
-        self.inp_alamat.setPlaceholderText("Masukkan alamat")
+        tombol_baris = QHBoxLayout()
+        self.tmp = QPushButton("Tempel dari Clipboard")
+        self.tmp.clicked.connect(self.tempel)
+        self.smpn = QPushButton("Simpan")
+        self.smpn.clicked.connect(self.simpan)
+        tombol_baris.addWidget(self.tmp)
+        tombol_baris.addWidget(self.smpn)
 
-        self.btn_tambah = QPushButton("Tambah")
-        self.btn_tambah.clicked.connect(self.tambah_data)
-
-        self.btn_ubah = QPushButton("Ubah")
-        self.btn_ubah.clicked.connect(self.ubah_data)
-
-        self.btn_hapus = QPushButton("Hapus")
-        self.btn_hapus.clicked.connect(self.hapus_data)
-
-        layout_form = QVBoxLayout()
-        layout_form.setSpacing(10)
-        layout_form.addWidget(self.lbl_nama)
-        layout_form.addWidget(self.inp_nama)
-        layout_form.addWidget(self.btn_tempel)
-        layout_form.addWidget(self.lbl_alamat)
-        layout_form.addWidget(self.inp_alamat)
-        layout_form.addWidget(self.btn_tambah)
-        layout_form.addWidget(self.btn_ubah)
-        layout_form.addWidget(self.btn_hapus)
-        layout_form.addStretch()
-
-        form = QWidget()
-        form.setLayout(layout_form)
-
-        scroll_form = QScrollArea()
-        scroll_form.setWidgetResizable(True)
-        scroll_form.setWidget(form)
-        scroll_form.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.cari = QLineEdit()
+        self.cari.setPlaceholderText("Cari judul...")
+        self.cari.textChanged.connect(self.cari_data)
 
         self.tbl = QTableWidget()
-        self.tbl.setColumnCount(2)
-        self.tbl.setHorizontalHeaderLabels(["Nama", "Alamat"])
-        self.tbl.setSelectionBehavior(self.tbl.SelectRows)
-        self.tbl.cellClicked.connect(self.pilih_baris)
-        self.tbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.tbl.setColumnCount(4)
+        self.tbl.setHorizontalHeaderLabels(["ID", "Judul", "Penulis", "Tahun"])
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tbl.cellDoubleClicked.connect(self.edit_data)
 
-        splt = QSplitter(Qt.Horizontal)
-        splt.addWidget(scroll_form)
-        splt.addWidget(self.tbl)
-        splt.setStretchFactor(1, 2)
+        bawah = QHBoxLayout()
+        self.hps = QPushButton("Hapus")
+        self.hps.clicked.connect(self.hapus)
+        self.exp = QPushButton("Export CSV")
+        self.exp.clicked.connect(self.export)
+        bawah.addWidget(self.hps)
+        bawah.addWidget(self.exp)
 
-        dock = QDockWidget("Bantuan", self)
-        self.txt_bantuan = QTextEdit()
-        self.txt_bantuan.setReadOnly(True)
-        self.txt_bantuan.setText(
-            "Petunjuk:\n"
-            "- Isi nama dan alamat\n"
-            "- Klik Tambah untuk simpan\n"
-            "- Klik baris di tabel lalu Ubah atau Hapus\n"
-            "- Gunakan tombol 'Tempel dari Clipboard' untuk menempel data dari luar"
-        )
-        dock.setWidget(self.txt_bantuan)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
 
-        status = QStatusBar()
-        status.setStyleSheet("QStatusBar{padding-right:12px;}")
-        lbl_kredit = QLabel("Muh. Ressa A.M | NIM: F1D022137")
-        status.addPermanentWidget(lbl_kredit)
-        self.setStatusBar(status)
+        scroll_area = QScrollArea()
+        isi_widget = QWidget()
+        isi_layout = QVBoxLayout()
+        isi_layout.addLayout(form)
+        isi_layout.addLayout(tombol_baris)
+        isi_layout.addWidget(self.cari)
+        isi_layout.addWidget(self.tbl)
+        isi_layout.addLayout(bawah)
+        isi_widget.setLayout(isi_layout)
+        scroll_area.setWidget(isi_widget)
+        scroll_area.setWidgetResizable(True)
 
-        isi = QWidget()
-        layout_utama = QVBoxLayout()
-        layout_utama.addWidget(splt)
-        isi.setLayout(layout_utama)
-        self.setCentralWidget(isi)
+        utama.addWidget(scroll_area)
 
-    def tempel_clipboard(self):
-        teks = QApplication.clipboard().text()
-        self.inp_nama.setText(teks)
+        # Footer
+        self.footer = QLabel("Muh. Ressa Arsy Ma'rif | NIM: F1D022137")
+        self.footer.setAlignment(Qt.AlignCenter)
+        self.footer.setStyleSheet("color: gray; font-size: 9pt; padding: 8px;")
+        utama.addWidget(self.footer)
 
-    def tambah_data(self):
-        nama = self.inp_nama.text().strip()
-        alamat = self.inp_alamat.text().strip()
-        if nama and alamat:
-            self.data.append((nama, alamat))
-            self.refresh_tbl()
-            self.kosongkan_input()
+        pusat.setLayout(utama)
+        self.setCentralWidget(pusat)
 
-    def ubah_data(self):
-        baris = self.tbl.currentRow()
-        if baris >= 0:
-            nama = self.inp_nama.text().strip()
-            alamat = self.inp_alamat.text().strip()
-            self.data[baris] = (nama, alamat)
-            self.refresh_tbl()
-            self.kosongkan_input()
+        # QDockWidget (Catatan)
+        self.catatan = QTextEdit()
+        self.catatan.setPlaceholderText("Catatan tambahan...")
+        self.dock = QWidget()
+        dock_layout = QVBoxLayout()
+        dock_layout.addWidget(QLabel("Catatan"))
+        dock_layout.addWidget(self.catatan)
+        self.dock.setLayout(dock_layout)
+        self.dock_area = QDockWidget("Catatan", self)
+        self.dock_area.setWidget(self.dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.dock_area)
 
-    def hapus_data(self):
-        baris = self.tbl.currentRow()
-        if baris >= 0:
-            del self.data[baris]
-            self.refresh_tbl()
-            self.kosongkan_input()
-
-    def pilih_baris(self, baris, kolom):
-        nama, alamat = self.data[baris]
-        self.inp_nama.setText(nama)
-        self.inp_alamat.setText(alamat)
-
-    def refresh_tbl(self):
+    def load_data(self):
         self.tbl.setRowCount(0)
-        for i, (nama, alamat) in enumerate(self.data):
-            self.tbl.insertRow(i)
-            self.tbl.setItem(i, 0, QTableWidgetItem(nama))
-            self.tbl.setItem(i, 1, QTableWidgetItem(alamat))
+        self.kur.execute("SELECT * FROM buku")
+        for baris in self.kur.fetchall():
+            idx = self.tbl.rowCount()
+            self.tbl.insertRow(idx)
+            for kol, val in enumerate(baris):
+                self.tbl.setItem(idx, kol, QTableWidgetItem(str(val)))
 
-    def kosongkan_input(self):
-        self.inp_nama.clear()
-        self.inp_alamat.clear()
+    def simpan(self):
+        jdl, pns, th = self.nm.text(), self.pnls.text(), self.thn.text()
+        if not (jdl and pns and th.isdigit()):
+            QMessageBox.warning(self, "Peringatan", "Isi semua kolom dengan benar!")
+            return
+        self.kur.execute("INSERT INTO buku (judul, penulis, tahun) VALUES (?, ?, ?)", (jdl, pns, int(th)))
+        self.kon.commit()
+        self.nm.clear(); self.pnls.clear(); self.thn.clear()
+        self.load_data()
+        self.status.showMessage("Data disimpan", 3000)
 
+    def tempel(self):
+        teks = QApplication.clipboard().text()
+        self.nm.setText(teks)
+        self.status.showMessage("Judul ditempel dari clipboard", 3000)
+
+    def cari_data(self, teks):
+        self.tbl.setRowCount(0)
+        self.kur.execute("SELECT * FROM buku WHERE judul LIKE ?", ('%' + teks + '%',))
+        for baris in self.kur.fetchall():
+            idx = self.tbl.rowCount()
+            self.tbl.insertRow(idx)
+            for kol, val in enumerate(baris):
+                self.tbl.setItem(idx, kol, QTableWidgetItem(str(val)))
+
+    def edit_data(self, baris, kol):
+        id_data = int(self.tbl.item(baris, 0).text())
+        j, p, t = self.tbl.item(baris, 1).text(), self.tbl.item(baris, 2).text(), self.tbl.item(baris, 3).text()
+        dlg = DialogEdit(id_data, j, p, t)
+        if dlg.exec_():
+            jb, pb, tb = dlg.get_data()
+            if not (jb and pb and tb.isdigit()):
+                QMessageBox.warning(self, "Peringatan", "Data tidak valid!")
+                return
+            self.kur.execute("UPDATE buku SET judul=?, penulis=?, tahun=? WHERE id=?", (jb, pb, int(tb), id_data))
+            self.kon.commit()
+            self.load_data()
+            self.status.showMessage("Data diperbarui", 3000)
+
+    def hapus(self):
+        baris = self.tbl.currentRow()
+        if baris < 0:
+            QMessageBox.warning(self, "Pilih data", "Pilih data yang akan dihapus.")
+            return
+        id_data = int(self.tbl.item(baris, 0).text())
+        self.kur.execute("DELETE FROM buku WHERE id=?", (id_data,))
+        self.kon.commit()
+        self.load_data()
+        self.status.showMessage("Data dihapus", 3000)
+
+    def export(self):
+        self.kur.execute("SELECT * FROM buku")
+        data = self.kur.fetchall()
+        with open("data_buku.csv", "w", newline="", encoding="utf-8") as f:
+            tulis = csv.writer(f)
+            tulis.writerow(["ID", "Judul", "Penulis", "Tahun"])
+            tulis.writerows(data)
+        QMessageBox.information(self, "Berhasil", "Data disimpan ke data_buku.csv")
+        self.status.showMessage("Data diekspor", 3000)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    win = AplikasiCRUD()
+    win = AplBuku()
     win.show()
     sys.exit(app.exec_())
